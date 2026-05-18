@@ -7,12 +7,8 @@ import pandas as pd
 st.title("⚙️ CHECK CICLI PRODUTTIVI E KPI")
 
 codice = st.text_input("Codice prodotto (es. 9188)")
+K = 5
 
-K = 5  # stabilità confidence
-
-# =====================
-# INPUT TEORICO (FONDAMENTALE)
-# =====================
 ore_teoriche = st.number_input("Ore teoriche", value=0.0)
 pezzi_teorici = st.number_input("Pezzi teorici", value=0.0)
 
@@ -31,7 +27,7 @@ if codice:
     df_a, df_b = load_data()
 
     # =====================
-    # PULIZIA B
+    # CLEAN B
     # =====================
     df_b = df_b.copy()
     df_b.columns = df_b.columns.str.strip()
@@ -74,9 +70,6 @@ if codice:
         per_lotto["COPPIA"].str.contains(codice, na=False)
     ]
 
-    # =====================
-    # COMPAGNO
-    # =====================
     if not per_lotto.empty:
 
         per_lotto["A"] = per_lotto["COPPIA"].str.split("-").str[0]
@@ -108,14 +101,14 @@ if codice:
             stats["FREQUENZA"] / (stats["FREQUENZA"] + K)
         )
 
-        st.subheader("🚀 RUN PRODUTTIVO - MIGLIOR SKU DA ASSOCIARE")
+        st.subheader("🚀 RUN PRODUTTIVO")
         st.dataframe(stats)
 
     else:
         st.warning("Nessuna coppia trovata")
 
     # =====================
-    # KPI PRODUZIONE
+    # KPI
     # =====================
     df_a = df_a.copy()
     df_a.columns = df_a.columns.str.strip()
@@ -140,32 +133,26 @@ if codice:
     df_merge = pd.merge(ore_lotti, qta_lotti, on="LOTTO", how="inner")
 
     if df_merge.empty:
-        st.error("Nessun lotto comune trovato tra A e B")
+        st.error("MERGE VUOTO")
 
     else:
 
-        # =====================
-        # KPI BASE
-        # =====================
-        df_merge["ORE_PER_PEZZO"] = df_merge["ORE TOT FASE"] / df_merge["QUANTITA"]
+        df_merge = df_merge[df_merge["QUANTITA"] > 0].copy()
+
+        df_merge["ORE_PER_PEZZO"] = (
+            df_merge["ORE TOT FASE"] / df_merge["QUANTITA"]
+        )
 
         ore_per_pezzo_medio = df_merge["ORE_PER_PEZZO"].mean()
 
         ore_totali = df_merge["ORE TOT FASE"].sum()
         qta_totale = df_merge["QUANTITA"].sum()
 
-        # =====================
-        # 🔥 FIX CHIAVE (CORRETTO)
-        # =====================
-        pezzi_stimati = (
-            ore_teoriche / ore_per_pezzo_medio
-            if ore_per_pezzo_medio > 0
-            else 0
-        )
+        if ore_per_pezzo_medio > 0 and ore_teoriche > 0:
+            pezzi_stimati = ore_teoriche / ore_per_pezzo_medio
+        else:
+            pezzi_stimati = 0
 
-        # =====================
-        # VOLATILITA
-        # =====================
         rate_teorico = (
             pezzi_teorici / ore_teoriche
             if ore_teoriche > 0 else 0
@@ -176,14 +163,8 @@ if codice:
             if ore_totali > 0 else 0
         )
 
-        volatilita = (
-            abs(rate_reale - rate_teorico) / rate_teorico
-            if rate_teorico > 0 else 0
-        )
+        volatilita = abs(rate_reale - rate_teorico) / rate_teorico if rate_teorico > 0 else 0
 
-        # =====================
-        # OUTPUT KPI
-        # =====================
         st.subheader("⚙️ KPI Produzione")
 
         st.write({
@@ -194,9 +175,6 @@ if codice:
             "VOLATILITA_CICLO": round(volatilita, 4)
         })
 
-        # =====================
-        # KPI ECONOMICI
-        # =====================
         st.subheader("💰 KPI Economici")
 
         civ = st.number_input("CIV", value=0.0)
