@@ -8,7 +8,14 @@ st.title("⚙️ CHECK CICLI PRODUTTIVI E KPI")
 
 codice = st.text_input("Codice prodotto (es. 9188)")
 
+# NUOVO: ore teoriche del turno
+ore_teoriche = st.number_input(
+    "Ore teoriche turno",
+    value=8.0
+)
+
 K = 5  # stabilità confidence
+
 
 # =====================
 # CARICAMENTO DATI
@@ -34,28 +41,13 @@ if codice:
 
     df_b.columns = df_b.columns.str.strip()
 
-    df_b["CODICE"] = (
-        df_b["CODICE"]
-        .astype(str)
-        .str.strip()
-    )
-
-    df_b["LOTTO"] = (
-        df_b["LOTTO"]
-        .astype(str)
-        .str.strip()
-    )
-
+    df_b["CODICE"] = df_b["CODICE"].astype(str).str.strip()
+    df_b["LOTTO"] = df_b["LOTTO"].astype(str).str.strip()
     df_b["QUANTITà"] = pd.to_numeric(
         df_b["QUANTITà"],
         errors="coerce"
     )
-
-    df_b["FAMIGLIA"] = (
-        df_b["FAMIGLIA"]
-        .astype(str)
-        .str.strip()
-    )
+    df_b["FAMIGLIA"] = df_b["FAMIGLIA"].astype(str).str.strip()
 
     # =====================
     # FILTRO FAMIGLIE
@@ -78,7 +70,7 @@ if codice:
 
     # =====================
     # NORMALIZZAZIONE
-    # 1 RIGA = 1 LOTTO + CODICE
+    # 1 riga = 1 lotto + 1 codice
     # =====================
     df_b = (
         df_b.groupby(
@@ -102,7 +94,7 @@ if codice:
     )
 
     # =====================
-    # COPPIE
+    # CREAZIONE COPPIE
     # =====================
     per_lotto = (
         df_lotti_2.groupby("LOTTO")
@@ -121,16 +113,14 @@ if codice:
         .reset_index()
     )
 
-    # =====================
-    # SOLO COPPIE CON CODICE INPUT
-    # =====================
+    # solo coppie che contengono il codice input
     per_lotto = per_lotto[
         per_lotto["COPPIA"]
         .str.contains(codice, na=False)
     ]
 
     # =====================
-    # ANALISI COMPAGNO
+    # MIGLIOR SKU DA ASSOCIARE
     # =====================
     if not per_lotto.empty:
 
@@ -157,21 +147,13 @@ if codice:
         stats = (
             per_lotto.groupby("COMPAGNO")
             .agg(
-                QUANTITA_MEDIA=(
-                    "QUANTITA",
-                    "mean"
-                ),
-                FREQUENZA=(
-                    "COMPAGNO",
-                    "count"
-                )
+                QUANTITA_MEDIA=("QUANTITA", "mean"),
+                FREQUENZA=("COMPAGNO", "count")
             )
             .reset_index()
         )
 
-        # =====================
-        # SCORE
-        # =====================
+        # normalizzazioni
         stats["Q_N"] = (
             stats["QUANTITA_MEDIA"] /
             stats["QUANTITA_MEDIA"].max()
@@ -182,11 +164,13 @@ if codice:
             stats["FREQUENZA"].max()
         )
 
+        # score
         stats["SCORE"] = (
             stats["Q_N"] * 0.6 +
             stats["F_N"] * 0.4
         )
 
+        # confidence
         stats["CONFIDENCE"] = (
             stats["SCORE"] *
             (
@@ -200,9 +184,6 @@ if codice:
             ascending=False
         )
 
-        # =====================
-        # OUTPUT RUN PRODUTTIVO
-        # =====================
         st.subheader(
             "🚀 RUN PRODUTTIVO - MIGLIOR SKU DA ASSOCIARE"
         )
@@ -210,9 +191,7 @@ if codice:
         st.dataframe(stats)
 
     else:
-        st.warning(
-            "Nessuna coppia trovata"
-        )
+        st.warning("Nessuna coppia trovata")
 
     # =====================
     # KPI PRODUZIONE
@@ -256,9 +235,7 @@ if codice:
         errors="coerce"
     )
 
-    # =====================
-    # ORE PER LOTTO
-    # =====================
+    # ore per lotto
     ore_lotti = (
         df_a.groupby(
             "LOTTO",
@@ -267,9 +244,7 @@ if codice:
         .sum()
     )
 
-    # =====================
-    # QUANTITA SOLO CODICE INPUT
-    # =====================
+    # quantità solo del codice cercato
     qta_lotti = (
         df_b[
             df_b["CODICE"]
@@ -282,9 +257,7 @@ if codice:
         .sum()
     )
 
-    # =====================
-    # MERGE KPI
-    # =====================
+    # merge
     df_merge = pd.merge(
         ore_lotti,
         qta_lotti,
@@ -292,9 +265,6 @@ if codice:
         how="inner"
     )
 
-    # =====================
-    # CONTROLLO MERGE
-    # =====================
     if df_merge.empty:
 
         st.error(
@@ -326,18 +296,18 @@ if codice:
             .sum()
         )
 
+        # FIX CORRETTO
+        # pezzi stimati sul turno teorico
         pezzi_stimati = (
-            ore_totali / ore_per_pezzo
+            ore_teoriche / ore_per_pezzo
             if ore_per_pezzo > 0
             else 0
         )
 
-        # =====================
-        # VOLATILITA
-        # =====================
+        # volatilità
         rate_teorico = (
-            pezzi_stimati / ore_totali
-            if ore_totali > 0
+            pezzi_stimati / ore_teoriche
+            if ore_teoriche > 0
             else 0
         )
 
@@ -348,20 +318,13 @@ if codice:
         )
 
         volatilita = (
-            abs(
-                rate_reale -
-                rate_teorico
-            )
+            abs(rate_reale - rate_teorico)
+            / rate_teorico
             if rate_teorico > 0
             else 0
         )
 
-        # =====================
-        # OUTPUT KPI
-        # =====================
-        st.subheader(
-            "⚙️ KPI Produzione"
-        )
+        st.subheader("⚙️ KPI Produzione")
 
         st.write({
             "ORE_TOT_REALI":
@@ -383,9 +346,7 @@ if codice:
         # =====================
         # KPI ECONOMICI
         # =====================
-        st.subheader(
-            "💰 KPI Economici"
-        )
+        st.subheader("💰 KPI Economici")
 
         civ = st.number_input(
             "CIV",
