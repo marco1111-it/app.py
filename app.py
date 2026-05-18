@@ -326,11 +326,13 @@ if codice:
             .sum()
         )
 
-        pezzi_stimati = (
-            ore_totali / ore_per_pezzo
-            if ore_per_pezzo > 0
-            else 0
-        )
+       ore_per_pezzo_medio = df_merge["ORE_PER_PEZZO"].mean()
+
+pezzi_stimati = (
+    ore_totali / ore_per_pezzo_medio
+    if ore_per_pezzo_medio > 0
+    else 0
+)
 
         # =====================
         # VOLATILITA
