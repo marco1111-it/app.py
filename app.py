@@ -8,8 +8,7 @@ st.title("⚙️ CHECK CICLI PRODUTTIVI E KPI")
 
 codice = st.text_input("Codice prodotto (es. 9188)")
 
-K = 5  # parametro stabilità confidence
-
+K = 5  # stabilità confidence
 
 # =====================
 # CARICAMENTO DATI
@@ -23,73 +22,156 @@ def load_data():
 
 if codice:
 
+    # =====================
+    # LOAD FILE
+    # =====================
     df_a, df_b = load_data()
 
     # =====================
-    # FOGLIO B - PULIZIA
+    # PULIZIA FOGLIO B
     # =====================
     df_b = df_b.copy()
 
     df_b.columns = df_b.columns.str.strip()
 
-    df_b["CODICE"] = df_b["CODICE"].astype(str).str.strip()
-    df_b["LOTTO"] = df_b["LOTTO"].astype(str).str.strip()
-    df_b["QUANTITà"] = pd.to_numeric(df_b["QUANTITà"], errors="coerce")
-    df_b["FAMIGLIA"] = df_b["FAMIGLIA"].astype(str).str.strip()
-
-    # filtro famiglie escluse
-    df_b = df_b[~df_b["FAMIGLIA"].str.contains("PANE", case=False, na=False)]
-    df_b = df_b[~df_b["FAMIGLIA"].str.contains("GRISSINI", case=False, na=False)]
-
-    # FIX FONDAMENTALE:
-    # una sola riga per LOTTO + CODICE
-    df_b = df_b.groupby(
-        ["LOTTO", "CODICE"],
-        as_index=False
-    ).agg({
-        "QUANTITà": "sum",
-        "FAMIGLIA": "first"
-    })
-
-    # =====================
-    # ANALISI COPPIE
-    # =====================
-    df_pair = (
-        df_b.groupby("LOTTO")
-        .apply(lambda x: pd.Series({
-            "COPPIA": "-".join(sorted(x["CODICE"].dropna().unique())),
-            "QUANTITA": x["QUANTITà"].sum()
-        }))
-        .reset_index()
+    df_b["CODICE"] = (
+        df_b["CODICE"]
+        .astype(str)
+        .str.strip()
     )
 
-    # solo coppie che contengono il codice cercato
-    df_pair = df_pair[
-        df_pair["COPPIA"].str.contains(codice)
+    df_b["LOTTO"] = (
+        df_b["LOTTO"]
+        .astype(str)
+        .str.strip()
+    )
+
+    df_b["QUANTITà"] = pd.to_numeric(
+        df_b["QUANTITà"],
+        errors="coerce"
+    )
+
+    df_b["FAMIGLIA"] = (
+        df_b["FAMIGLIA"]
+        .astype(str)
+        .str.strip()
+    )
+
+    # =====================
+    # FILTRO FAMIGLIE
+    # =====================
+    df_b = df_b[
+        ~df_b["FAMIGLIA"].str.contains(
+            "PANE",
+            case=False,
+            na=False
+        )
+    ]
+
+    df_b = df_b[
+        ~df_b["FAMIGLIA"].str.contains(
+            "GRISSINI",
+            case=False,
+            na=False
+        )
     ]
 
     # =====================
-    # MIGLIOR SKU DA ASSOCIARE
+    # NORMALIZZAZIONE
+    # 1 RIGA = 1 LOTTO + CODICE
     # =====================
-    if not df_pair.empty:
+    df_b = (
+        df_b.groupby(
+            ["LOTTO", "CODICE"],
+            as_index=False
+        )
+        .agg({
+            "QUANTITà": "sum",
+            "FAMIGLIA": "first"
+        })
+    )
 
-        df_pair["A"] = df_pair["COPPIA"].str.split("-").str[0]
-        df_pair["B"] = df_pair["COPPIA"].str.split("-").str[1]
+    # =====================
+    # SOLO LOTTI CON 2 CODICI
+    # =====================
+    df_lotti_2 = (
+        df_b.groupby("LOTTO")
+        .filter(
+            lambda x: x["CODICE"].nunique() == 2
+        )
+    )
 
-        df_pair["COMPAGNO"] = df_pair.apply(
-            lambda x: x["B"] if x["A"] == codice else x["A"],
+    # =====================
+    # COPPIE
+    # =====================
+    per_lotto = (
+        df_lotti_2.groupby("LOTTO")
+        .apply(
+            lambda x: pd.Series({
+                "COPPIA": "-".join(
+                    sorted(
+                        x["CODICE"]
+                        .dropna()
+                        .unique()
+                    )
+                ),
+                "QUANTITA": x["QUANTITà"].sum()
+            })
+        )
+        .reset_index()
+    )
+
+    # =====================
+    # SOLO COPPIE CON CODICE INPUT
+    # =====================
+    per_lotto = per_lotto[
+        per_lotto["COPPIA"]
+        .str.contains(codice, na=False)
+    ]
+
+    # =====================
+    # ANALISI COMPAGNO
+    # =====================
+    if not per_lotto.empty:
+
+        per_lotto["A"] = (
+            per_lotto["COPPIA"]
+            .str.split("-")
+            .str[0]
+        )
+
+        per_lotto["B"] = (
+            per_lotto["COPPIA"]
+            .str.split("-")
+            .str[1]
+        )
+
+        per_lotto["COMPAGNO"] = per_lotto.apply(
+            lambda x:
+                x["B"]
+                if x["A"] == codice
+                else x["A"],
             axis=1
         )
 
         stats = (
-            df_pair.groupby("COMPAGNO")
+            per_lotto.groupby("COMPAGNO")
             .agg(
-                QUANTITA_MEDIA=("QUANTITA", "mean"),
-                FREQUENZA=("COMPAGNO", "count")
+                QUANTITA_MEDIA=(
+                    "QUANTITA",
+                    "mean"
+                ),
+                FREQUENZA=(
+                    "COMPAGNO",
+                    "count"
+                )
             )
             .reset_index()
         )
 
+        # =====================
+        # SCORE
+        # =====================
         stats["Q_N"] = (
             stats["QUANTITA_MEDIA"] /
             stats["QUANTITA_MEDIA"].max()
@@ -107,8 +189,10 @@ if codice:
 
         stats["CONFIDENCE"] = (
             stats["SCORE"] *
-            (stats["FREQUENZA"] /
-             (stats["FREQUENZA"] + K))
+            (
+                stats["FREQUENZA"] /
+                (stats["FREQUENZA"] + K)
+            )
         )
 
         stats = stats.sort_values(
@@ -116,6 +200,9 @@ if codice:
             ascending=False
         )
 
+        # =====================
+        # OUTPUT RUN PRODUTTIVO
+        # =====================
         st.subheader(
             "🚀 RUN PRODUTTIVO - MIGLIOR SKU DA ASSOCIARE"
         )
@@ -123,14 +210,18 @@ if codice:
         st.dataframe(stats)
 
     else:
-        st.warning("Nessuna coppia trovata")
+        st.warning(
+            "Nessuna coppia trovata"
+        )
 
     # =====================
-    # FOGLIO A - KPI PRODUZIONE
+    # KPI PRODUZIONE
     # =====================
     df_a = df_a.copy()
 
-    df_a.columns = df_a.columns.str.strip()
+    df_a.columns = (
+        df_a.columns.str.strip()
+    )
 
     df_a["REFERENZA"] = (
         df_a["REFERENZA"]
@@ -151,12 +242,11 @@ if codice:
     )
 
     df_a = df_a[
-        df_a["REFERENZA"].str.contains(
-            codice,
-            na=False
-        )
+        df_a["REFERENZA"]
+        .str.contains(codice, na=False)
     ]
 
+    # escludi turno 2
     df_a = df_a[
         df_a["TURNO"] != "2"
     ]
@@ -166,21 +256,35 @@ if codice:
         errors="coerce"
     )
 
+    # =====================
+    # ORE PER LOTTO
+    # =====================
     ore_lotti = (
-        df_a.groupby("LOTTO", as_index=False)
-        ["ORE TOT FASE"]
+        df_a.groupby(
+            "LOTTO",
+            as_index=False
+        )["ORE TOT FASE"]
         .sum()
     )
 
-    # quantità solo dei lotti del codice scelto
+    # =====================
+    # QUANTITA SOLO CODICE INPUT
+    # =====================
     qta_lotti = (
-        df_b[df_b["CODICE"] == codice]
-        .groupby("LOTTO", as_index=False)
-        ["QUANTITà"]
+        df_b[
+            df_b["CODICE"]
+            .str.contains(codice, na=False)
+        ]
+        .groupby(
+            "LOTTO",
+            as_index=False
+        )["QUANTITà"]
         .sum()
     )
 
-    # merge corretto
+    # =====================
+    # MERGE KPI
+    # =====================
     df_merge = pd.merge(
         ore_lotti,
         qta_lotti,
@@ -188,8 +292,20 @@ if codice:
         how="inner"
     )
 
-    if not df_merge.empty:
+    # =====================
+    # CONTROLLO MERGE
+    # =====================
+    if df_merge.empty:
 
+        st.error(
+            "Nessun lotto comune trovato tra A e B"
+        )
+
+    else:
+
+        # =====================
+        # KPI
+        # =====================
         df_merge["ORE_PER_PEZZO"] = (
             df_merge["ORE TOT FASE"] /
             df_merge["QUANTITà"]
@@ -212,39 +328,64 @@ if codice:
 
         pezzi_stimati = (
             ore_totali / ore_per_pezzo
-            if ore_per_pezzo > 0 else 0
+            if ore_per_pezzo > 0
+            else 0
         )
 
-        # volatilità
+        # =====================
+        # VOLATILITA
+        # =====================
         rate_teorico = (
             pezzi_stimati / ore_totali
-            if ore_totali > 0 else 0
+            if ore_totali > 0
+            else 0
         )
 
         rate_reale = (
             qta_totale / ore_totali
-            if ore_totali > 0 else 0
+            if ore_totali > 0
+            else 0
         )
 
         volatilita = (
-            abs(rate_reale - rate_teorico)
-            if rate_teorico > 0 else 0
+            abs(
+                rate_reale -
+                rate_teorico
+            )
+            if rate_teorico > 0
+            else 0
         )
 
-        st.subheader("⚙️ KPI Produzione")
+        # =====================
+        # OUTPUT KPI
+        # =====================
+        st.subheader(
+            "⚙️ KPI Produzione"
+        )
 
         st.write({
-            "ORE_TOT_REALI": ore_totali,
-            "QUANTITA_TOT": qta_totale,
-            "ORE_PER_PEZZO": ore_per_pezzo,
-            "PEZZI_STIMATI": pezzi_stimati,
-            "VOLATILITA_CICLO": volatilita
+            "ORE_TOT_REALI":
+                round(ore_totali, 2),
+
+            "QUANTITA_TOT":
+                round(qta_totale, 2),
+
+            "ORE_PER_PEZZO":
+                round(ore_per_pezzo, 4),
+
+            "PEZZI_STIMATI":
+                round(pezzi_stimati, 0),
+
+            "VOLATILITA_CICLO":
+                round(volatilita, 4)
         })
 
         # =====================
         # KPI ECONOMICI
         # =====================
-        st.subheader("💰 KPI Economici")
+        st.subheader(
+            "💰 KPI Economici"
+        )
 
         civ = st.number_input(
             "CIV",
@@ -266,7 +407,8 @@ if codice:
         costo_unitario = (
             (civ + costo_fisso) /
             pezzi_stimati
-            if pezzi_stimati > 0 else 0
+            if pezzi_stimati > 0
+            else 0
         )
 
         prezzo_vendita = (
@@ -275,6 +417,9 @@ if codice:
         )
 
         st.write({
-            "COSTO_UNITARIO": costo_unitario,
-            "PREZZO_VENDITA": prezzo_vendita
+            "COSTO_UNITARIO":
+                round(costo_unitario, 4),
+
+            "PREZZO_VENDITA":
+                round(prezzo_vendita, 4)
         })
