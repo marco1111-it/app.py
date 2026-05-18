@@ -81,7 +81,7 @@ if codice:
 
         stats = stats.sort_values("SCORE", ascending=False)
 
-        st.subheader("🔗 Miglior Compagno")
+        st.subheader("🔗 MIGLIOR CODICE DA AFFIANCARE IN TURNO")
         st.dataframe(stats)
 
     else:
