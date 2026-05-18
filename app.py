@@ -1,23 +1,32 @@
 import streamlit as st
 import pandas as pd
 
-st.title("📊 Produzione + Coppie + KPI Economici")
+st.title("📊 ANALISI OPERATIONS BAKERY")
 
 # =====================
 # INPUT
 # =====================
 codice = st.text_input("Codice prodotto (es. L9)")
-file = st.file_uploader("Carica Excel", type=["xlsx"])
 
 K = 5  # stabilità confidence
 
-if file and codice:
+# =====================
+# CARICAMENTO DATI FISSO (NO UPLOAD)
+# =====================
+@st.cache_data
+def load_data():
+    df_b = pd.read_excel("dati.xlsx", sheet_name="B")
+    df_a = pd.read_excel("dati.xlsx", sheet_name="A")
+    return df_a, df_b
+
+
+if codice:
+
+    df_a, df_b = load_data()
 
     # =====================
     # FOGLIO B (COPPIE)
     # =====================
-    df_b = pd.read_excel(file, sheet_name="B")
-
     df_b.columns = df_b.columns.str.strip()
 
     df_b["CODICE"] = df_b["CODICE"].astype(str).str.strip()
@@ -81,8 +90,6 @@ if file and codice:
     # =====================
     # FOGLIO A (KPI PRODUZIONE)
     # =====================
-    df_a = pd.read_excel(file, sheet_name="A")
-
     df_a.columns = df_a.columns.str.strip()
 
     df_a["REFERENZA"] = df_a["REFERENZA"].astype(str).str.strip()
@@ -97,7 +104,7 @@ if file and codice:
     ore_lotti = df_a.groupby("LOTTO", as_index=False)["ORE TOT FASE"].sum()
 
     # =====================
-    # MERGE CON B
+    # MERGE
     # =====================
     qta_lotti = df_b.groupby("LOTTO", as_index=False)["QUANTITà"].sum()
 
