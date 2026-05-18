@@ -1,22 +1,19 @@
 import streamlit as st
 import pandas as pd
 
-st.title("📊 ANALISI OPERATIONS BAKERY")
+st.title("📊 CHECK CICLI PRODUTTIVI E KPI")
 
-# =====================
-# INPUT
-# =====================
-codice = st.text_input("Codice prodotto (es. L9)")
+codice = st.text_input("Codice prodotto (es. 9188)")
 
 K = 5  # stabilità confidence
 
 # =====================
-# CARICAMENTO DATI FISSO (NO UPLOAD)
+# CARICAMENTO DATI
 # =====================
 @st.cache_data
 def load_data():
-    df_b = pd.read_excel("dati.xlsx", sheet_name="B")
     df_a = pd.read_excel("dati.xlsx", sheet_name="A")
+    df_b = pd.read_excel("dati.xlsx", sheet_name="B")
     return df_a, df_b
 
 
@@ -25,8 +22,10 @@ if codice:
     df_a, df_b = load_data()
 
     # =====================
-    # FOGLIO B (COPPIE)
+    # PULIZIA FOGLIO B
     # =====================
+    df_b = df_b.copy()
+
     df_b.columns = df_b.columns.str.strip()
 
     df_b["CODICE"] = df_b["CODICE"].astype(str).str.strip()
@@ -38,34 +37,30 @@ if codice:
     df_b = df_b[~df_b["FAMIGLIA"].str.contains("PANE", case=False, na=False)]
     df_b = df_b[~df_b["FAMIGLIA"].str.contains("GRISSINI", case=False, na=False)]
 
-    # solo lotti con 2 codici
-    df2 = df_b.groupby("LOTTO").filter(lambda x: x["CODICE"].nunique() == 2)
+    # =====================
+    # COPPIE (1 riga per lotto)
+    # =====================
+    df_pair = df_b.groupby("LOTTO").apply(lambda x: pd.Series({
+        "COPPIA": "-".join(sorted(x["CODICE"].dropna().unique())),
+        "QUANTITA": x["QUANTITà"].sum()
+    })).reset_index()
 
-    per_lotto = (
-        df2.groupby("LOTTO")
-        .apply(lambda x: pd.Series({
-            "COPPIA": "-".join(sorted(x["CODICE"].dropna().unique())),
-            "QUANTITA": x["QUANTITà"].sum()
-        }))
-        .reset_index()
-    )
-
-    per_lotto = per_lotto[per_lotto["COPPIA"].str.contains(codice)]
+    df_pair = df_pair[df_pair["COPPIA"].str.contains(codice)]
 
     # =====================
-    # COMPAGNO
+    # COMPAGNO MIGLIORE
     # =====================
-    if not per_lotto.empty:
+    if not df_pair.empty:
 
-        per_lotto["A"] = per_lotto["COPPIA"].str.split("-").str[0]
-        per_lotto["B"] = per_lotto["COPPIA"].str.split("-").str[1]
+        df_pair["A"] = df_pair["COPPIA"].str.split("-").str[0]
+        df_pair["B"] = df_pair["COPPIA"].str.split("-").str[1]
 
-        per_lotto["COMPAGNO"] = per_lotto.apply(
+        df_pair["COMPAGNO"] = df_pair.apply(
             lambda x: x["B"] if x["A"] == codice else x["A"],
             axis=1
         )
 
-        stats = per_lotto.groupby("COMPAGNO").agg(
+        stats = df_pair.groupby("COMPAGNO").agg(
             QUANTITA_MEDIA=("QUANTITA", "mean"),
             FREQUENZA=("COMPAGNO", "count")
         ).reset_index()
@@ -81,15 +76,17 @@ if codice:
 
         stats = stats.sort_values("SCORE", ascending=False)
 
-        st.subheader("🔗 MIGLIOR CODICE DA AFFIANCARE IN TURNO")
+        st.subheader("🔗 RUN PRODUTTIVO - MIGLIOR SKU DA ASSOCIARE")
         st.dataframe(stats)
 
     else:
         st.warning("Nessuna coppia trovata")
 
     # =====================
-    # FOGLIO A (KPI PRODUZIONE)
+    # KPI PRODUZIONE (FOGLIO A)
     # =====================
+    df_a = df_a.copy()
+
     df_a.columns = df_a.columns.str.strip()
 
     df_a["REFERENZA"] = df_a["REFERENZA"].astype(str).str.strip()
@@ -104,15 +101,16 @@ if codice:
     ore_lotti = df_a.groupby("LOTTO", as_index=False)["ORE TOT FASE"].sum()
 
     # =====================
-    # MERGE
+    # FIX FONDAMENTALE: 1 riga per LOTTO (NO DUPLICATI)
     # =====================
-    df_b_clean = df_b.copy()
+    df_b_clean = df_b.groupby("LOTTO", as_index=False).agg({
+        "QUANTITà": "sum"
+    })
 
-df_b_clean = df_b_clean.groupby("LOTTO", as_index=False).agg({
-    "QUANTITà": "sum"
-})
-
-df_merge = pd.merge(ore_lotti, df_b_clean, on="LOTTO", how="inner")
+    # =====================
+    # MERGE CORRETTO
+    # =====================
+    df_merge = pd.merge(ore_lotti, df_b_clean, on="LOTTO", how="inner")
 
     if not df_merge.empty:
 
@@ -126,7 +124,7 @@ df_merge = pd.merge(ore_lotti, df_b_clean, on="LOTTO", how="inner")
         pezzi_stimati = ore_totali / ore_per_pezzo if ore_per_pezzo > 0 else 0
 
         # =====================
-        # VOLATILITA
+        # VOLATILITÀ
         # =====================
         rate_teorico = pezzi_stimati / ore_totali if ore_totali > 0 else 0
         rate_reale = qta_totale / ore_totali if ore_totali > 0 else 0
