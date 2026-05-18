@@ -11,6 +11,12 @@ codice = st.text_input("Codice prodotto (es. 9188)")
 K = 5  # stabilità confidence
 
 # =====================
+# INPUT TEORICO (FONDAMENTALE)
+# =====================
+ore_teoriche = st.number_input("Ore teoriche", value=0.0)
+pezzi_teorici = st.number_input("Pezzi teorici", value=0.0)
+
+# =====================
 # CARICAMENTO DATI
 # =====================
 @st.cache_data
@@ -22,9 +28,6 @@ def load_data():
 
 if codice:
 
-    # =====================
-    # LOAD FILE
-    # =====================
     df_a, df_b = load_data()
 
     # =====================
@@ -39,7 +42,6 @@ if codice:
 
     df_b["QUANTITA"] = pd.to_numeric(df_b["QUANTITà"], errors="coerce")
 
-    # filtro famiglie
     df_b = df_b[
         ~df_b["FAMIGLIA"].str.contains("PANE", case=False, na=False)
     ]
@@ -47,7 +49,6 @@ if codice:
         ~df_b["FAMIGLIA"].str.contains("GRISSINI", case=False, na=False)
     ]
 
-    # normalizzazione
     df_b = (
         df_b.groupby(["LOTTO", "CODICE"], as_index=False)
         .agg({
@@ -56,12 +57,10 @@ if codice:
         })
     )
 
-    # solo lotti con 2 codici
     df_lotti_2 = df_b.groupby("LOTTO").filter(
         lambda x: x["CODICE"].nunique() == 2
     )
 
-    # coppie
     per_lotto = (
         df_lotti_2.groupby("LOTTO")
         .apply(lambda x: pd.Series({
@@ -76,7 +75,7 @@ if codice:
     ]
 
     # =====================
-    # ANALISI COMPAGNO
+    # COMPAGNO
     # =====================
     if not per_lotto.empty:
 
@@ -108,8 +107,6 @@ if codice:
         stats["CONFIDENCE"] = stats["SCORE"] * (
             stats["FREQUENZA"] / (stats["FREQUENZA"] + K)
         )
-
-        stats = stats.sort_values("SCORE", ascending=False)
 
         st.subheader("🚀 RUN PRODUTTIVO - MIGLIOR SKU DA ASSOCIARE")
         st.dataframe(stats)
@@ -147,26 +144,46 @@ if codice:
 
     else:
 
-        df_merge["ORE_PER_PEZZO"] = (
-            df_merge["ORE TOT FASE"] / df_merge["QUANTITA"]
-        )
+        # =====================
+        # KPI BASE
+        # =====================
+        df_merge["ORE_PER_PEZZO"] = df_merge["ORE TOT FASE"] / df_merge["QUANTITA"]
+
+        ore_per_pezzo_medio = df_merge["ORE_PER_PEZZO"].mean()
 
         ore_totali = df_merge["ORE TOT FASE"].sum()
         qta_totale = df_merge["QUANTITA"].sum()
 
-        ore_per_pezzo_medio = df_merge["ORE_PER_PEZZO"].mean()
-
+        # =====================
+        # 🔥 FIX CHIAVE (CORRETTO)
+        # =====================
         pezzi_stimati = (
-            ore_totali / ore_per_pezzo_medio
+            ore_teoriche / ore_per_pezzo_medio
             if ore_per_pezzo_medio > 0
             else 0
         )
 
-        rate_teorico = pezzi_stimati / ore_totali if ore_totali > 0 else 0
-        rate_reale = qta_totale / ore_totali if ore_totali > 0 else 0
+        # =====================
+        # VOLATILITA
+        # =====================
+        rate_teorico = (
+            pezzi_teorici / ore_teoriche
+            if ore_teoriche > 0 else 0
+        )
 
-        volatilita = abs(rate_reale - rate_teorico) if rate_teorico > 0 else 0
+        rate_reale = (
+            qta_totale / ore_totali
+            if ore_totali > 0 else 0
+        )
 
+        volatilita = (
+            abs(rate_reale - rate_teorico) / rate_teorico
+            if rate_teorico > 0 else 0
+        )
+
+        # =====================
+        # OUTPUT KPI
+        # =====================
         st.subheader("⚙️ KPI Produzione")
 
         st.write({
@@ -188,8 +205,7 @@ if codice:
 
         costo_unitario = (
             (civ + costo_fisso) / pezzi_stimati
-            if pezzi_stimati > 0
-            else 0
+            if pezzi_stimati > 0 else 0
         )
 
         prezzo_vendita = costo_unitario * (1 + margine)
