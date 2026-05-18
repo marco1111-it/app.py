@@ -112,7 +112,7 @@ df_b_clean = df_b_clean.groupby("LOTTO", as_index=False).agg({
     "QUANTITà": "sum"
 })
 
-    df_merge = pd.merge(ore_lotti, df_b_clean, on="LOTTO", how="inner")
+df_merge = pd.merge(ore_lotti, df_b_clean, on="LOTTO", how="inner")
 
     if not df_merge.empty:
 
